@@ -196,6 +196,10 @@ CPU usage calculation control:
                             set interval 0 to get the percentage of time spent
                             running during the *entire lifetime* of a process.
 
+  -t, --threshold <num>    specifies the CPU usage threshold percentage.
+                            only show threads with CPU usage above this threshold.
+                            default is 50%.
+
 Miscellaneous:
   -h, --help                display this help and exit.
   -V, --version             display version information and exit.
@@ -221,8 +225,8 @@ progVersion() {
 
 # DO NOT declare and assign var ARGS(as readonly) in ONE line!
 ARGS=$(
-  getopt -n "$PROG" -a -o c:p:a:s:S:i:Pd:FmlhV \
-    -l count:,pid:,append-file:,jstack-path:,store-dir:,cpu-sample-interval:,use-ps,top-delay:,force,mix-native-frames,lock-info,help,version \
+  getopt -n "$PROG" -a -o c:p:a:s:S:i:Pd:FmlhVt: \
+    -l count:,pid:,append-file:,jstack-path:,store-dir:,cpu-sample-interval:,use-ps,top-delay:,force,mix-native-frames,lock-info,help,version,threshold: \
     -- "$@"
 ) || die -h
 eval set -- "$ARGS"
@@ -230,11 +234,16 @@ unset ARGS
 
 count=5
 cpu_sample_interval=0.5
+cpu_threshold=50  # 默认 CPU 使用率阈值为 50%
 
 while true; do
   case "$1" in
   -c | --count)
     count=$2
+    shift 2
+    ;;
+  -t | --threshold)
+    cpu_threshold=$2
     shift 2
     ;;
   -p | --pid)
@@ -288,7 +297,7 @@ while true; do
   esac
 done
 
-readonly count cpu_sample_interval force mix_native_frames lock_info
+readonly count cpu_sample_interval force mix_native_frames lock_info cpu_threshold
 readonly update_delay=${1:-0}
 isNonNegativeFloatNumber "$update_delay" || die "update delay($update_delay) is not a non-negative float number!"
 
@@ -527,6 +536,11 @@ findBusyJavaThreadsByTop() {
 printStackOfThreads() {
   local idx=0 pid threadId pcpu user threadId0x
   while read -r pid threadId pcpu user; do
+    # 如果 CPU 使用率小于 50%，跳过该线程
+    if (( $(echo "$pcpu < $cpu_threshold" | bc -l) )); then
+      continue
+    fi
+
     printf -v threadId0x '%#x' "$threadId"
 
     ((idx++ > 0)) && normalOutput
